@@ -1,0 +1,1 @@
+gcc array.h array.c Tests/Tests.h Tests/Tests.c main.c -o a.out
