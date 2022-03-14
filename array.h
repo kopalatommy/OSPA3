@@ -13,7 +13,8 @@
 
 typedef struct Semaphore {
     int counter;
-    pthread_t * waiting;
+    pthread_mutex_t ** waiting;
+    int waitingCount;
 } Semaphore;
 
 typedef struct Array
@@ -24,7 +25,8 @@ typedef struct Array
     char count;
     pthread_mutex_t mutex;
     pthread_mutexattr_t mutex_attr;
-    Semaphore semaphore;
+    Semaphore produceSemaphore;
+    Semaphore consumeSemaphore;
 } Array;
 
 int array_init(Array * pArray);
@@ -35,12 +37,12 @@ int array_get(Array * pArray, char ** pStr);
 
 void array_free(Array * pArray);
 
-void semaphore_init(Semaphore * semaphore);
+char semaphore_init(Semaphore * semaphore);
 
-void semaphore_wait(Semaphore * semaphore);
+char semaphore_wait(Semaphore * semaphore, pthread_mutex_t * waitMutex);
 
-void semaphore_signal(Semaphore * semaphore);
+char semaphore_signal(Semaphore * semaphore);
 
-void semaphore_sleep(Semaphore * semaphore);
+void semaphore_free(Semaphore * semaphore);
 
 #endif // _ARRAY_H_

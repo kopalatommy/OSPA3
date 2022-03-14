@@ -18,6 +18,11 @@ int array_init(Array * pArray)
         return -1;
     }
 
+    semaphore_init(&pArray->consumeSemaphore);
+    pArray->consumeSemaphore.counter = 0;
+    semaphore_init(&pArray->produceSemaphore);
+    pArray->produceSemaphore.counter = ARRAY_SIZE - 1;
+
     // Allocate buffer array
     pArray->buffer = (char*)malloc(160);
 
@@ -129,20 +134,47 @@ int array_get(Array * pArray, char ** pStr)
 void array_free(Array * pArray)
 {
     pthread_mutex_destroy(&pArray->mutex);
+    semaphore_free(&pArray->consumeSemaphore);
+    semaphore_free(&pArray->produceSemaphore);
     free(pArray->buffer);
 }
 
-void semaphore_init(Semaphore * semaphore)
+char semaphore_init(Semaphore * semaphore)
 {
-    semaphore->waiting = (pthread_t*)malloc(sizeof(pthread_t) * MAX_THREADS);
+    semaphore->waiting = (pthread_mutex_t**)malloc(sizeof(pthread_mutex_t*) * MAX_THREADS);
+    semaphore->counter = 0;
+    semaphore->waitingCount = 0;
     return semaphore->waiting != NULL ? 0 : -1;
 }
 
-void semaphore_wait(Semaphore * semaphore);
-
-void semaphore_signal(Semaphore * semaphore);
-
-void semaphore_sleep(Semaphore * semaphore)
+char semaphore_wait(Semaphore * semaphore, pthread_mutex_t * waitMutex)
 {
+    semaphore->counter--;
+    if(semaphore->counter < 0)
+    {
+        pthread_mutex_lock(waitMutex);
+        semaphore->waiting[semaphore->waitingCount++] = waitMutex;
+        //printf("Blocking thread. Count: %i\n", semaphore->waitingCount);
+    }
+    return 0;
+}
 
+char semaphore_signal(Semaphore * semaphore)
+{
+    semaphore->counter++;
+    if(semaphore->waitingCount > 0)
+    {
+        pthread_mutex_t * toAwake = semaphore->waiting[0];
+        for(char i = 1; i < semaphore->waitingCount; i++)
+            semaphore->waiting[i - 1] = semaphore->waiting[i];
+        semaphore->waitingCount--;
+        //printf("Waking thread. Count: %i\n", semaphore->waitingCount);
+        pthread_mutex_unlock(toAwake);
+    }
+    return 0;
+}
+
+void semaphore_free(Semaphore * semaphore)
+{
+    free(semaphore->waiting);
 }

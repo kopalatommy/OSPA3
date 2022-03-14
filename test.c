@@ -1,4 +1,55 @@
-#include "Tests.h"
+#ifndef _TESTS_H_
+#define _TESTS_H_
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "array.h"
+
+typedef struct ProducerArgs
+{
+    char ** source;
+    int count;
+    Array * pArray;
+} ProducerArgs;
+
+typedef struct ConsumerArgs
+{
+    Array * pArray;
+    int count;
+} ConsumerArgs;
+
+char test_array_runAll();
+
+// This makes sure the array is correctly initialized
+char test_array_initializeTest();
+
+// Tests adding 1 string to the array
+char test_array_put1();
+
+// Tests filling the array
+char test_array_put2();
+
+// Tests putting a string > MAX_NAME_LENGTH into the array
+char test_array_put3();
+
+// Tests writing > ARRAY_SIZE strings to the array
+char test_array_put4();
+
+// Tests getting 1 string from the array
+char test_array_get1();
+
+// Tests fully filling and then getting all strings in the array
+char test_array_get2();
+
+// Tests the operations: put -> put -> get -> get
+char test_array_get3();
+
+char test_thread_concurrent_get_put();
+
+char test_multthread_test();
+
+#endif // _TESTS_H_
 
 void m_memset(char * arr, char val, size_t len)
 {
@@ -19,6 +70,8 @@ void m_memcpy(char * dest, char * source, int len)
 char test_array_runAll()
 {
     char count = 0;
+
+    printf("Starting all tests\n");
 
     if(test_array_initializeTest() == 1)
     {
@@ -117,7 +170,9 @@ char test_array_initializeTest()
             printf("Array init test failed. Array tail != 0\n");
         }
 
+        //printf("Before array free\n");
         array_free(array);
+        //printf("After array free\n");
     }
 
     free(array);
@@ -527,9 +582,33 @@ void *test_producer_funct(void * pArgs)
 {
     struct ProducerArgs * args = (ProducerArgs*)pArgs;
 
+    printf("Producer creating mutex\n");
+
+    pthread_mutex_t waitMutex;
+    pthread_mutexattr_t mutex_attr;
+    if(pthread_mutexattr_init(&args->pArray->mutex_attr) == -1)
+    {
+        printf("Producer failed to init mutex attr\n");
+        return (void*)-1;
+    }
+    if(pthread_mutex_init(&waitMutex, &args->pArray->mutex_attr) == -1)
+    {
+        printf("Producer failed to init mutex\n");
+        return (void*)-1;
+    }
+
+    printf("Producer starting work\n");
+
     for(char i = 0; i < args->count; i++)
     {
-        while(array_put(args->pArray, *(args->source + i)) == -1);
+        semaphore_wait(&args->pArray->produceSemaphore, &waitMutex);
+
+        if(array_put(args->pArray, *(args->source + i)) == -1)
+        {
+            printf("Producer failed to put\n");
+            i--;
+        }
+        semaphore_signal(&args->pArray->consumeSemaphore);
     }
 
     printf("Producer finished\n");
@@ -539,11 +618,34 @@ void *test_consumer_funct(void * pArgs)
 {
     struct ConsumerArgs * args = (ConsumerArgs*)pArgs;
 
-    char * buffer = (char*)malloc(21);
-    while (args->count > 0)
+    printf("Consumer creating mutex\n");
+
+    pthread_mutex_t waitMutex;
+    pthread_mutexattr_t mutex_attr;
+    if(pthread_mutexattr_init(&args->pArray->mutex_attr) == -1)
     {
-        while(array_get(args->pArray, &buffer) == -1);
-        args->count--;
+        printf("Producer failed to init mutex attr\n");
+        return (void*)-1;
+    }
+    if(pthread_mutex_init(&waitMutex, &args->pArray->mutex_attr) == -1)
+    {
+        printf("Producer failed to init mutex\n");
+        return (void*)-1;
+    }
+
+    printf("Consumer work\n");
+
+    char * buffer = (char*)malloc(21);
+    for(char i = 0; i < args->count; i++)
+    {
+        semaphore_wait(&args->pArray->consumeSemaphore, &waitMutex);
+
+        if(array_get(args->pArray, &buffer) == -1)
+        {
+            printf("Consumer failed to get\n");
+            i--;
+        }
+        semaphore_signal(&args->pArray->produceSemaphore);
         printf("%s\n", buffer);
     }
     free(buffer);
@@ -565,6 +667,8 @@ char test_thread_concurrent_get_put()
         return -1;
     }
 
+    printf("Creating producer\n");
+
     char testMessage[] = {'T', 'E', 'S', 'T', ' ', 'D', 'A', 'T', 'A', ':', ' ', 0};
     char ** testData = (char**)malloc(sizeof(char*)*8);
     for(char i = 0; i < 8; i++)
@@ -580,15 +684,22 @@ char test_thread_concurrent_get_put()
     prodArgs->pArray = sharedArray;
     prodArgs->count = 8;
 
+    printf("Creating consumer\n");
+
     struct ConsumerArgs * consArgs = (ConsumerArgs*)malloc(sizeof(ConsumerArgs));
     consArgs->count = 8;
     consArgs->pArray = sharedArray;
+
+    printf("Starting consumer\n");
 
     if(pthread_create( &consumer_thread, NULL, test_consumer_funct, (void*) consArgs) != 0)
     {
         printf("Failed to start producer thread\n");
         return -1;
     }
+
+    printf("Starting producer\n");
+
     if(pthread_create( &producer_thread, NULL, test_producer_funct, (void*) prodArgs) != 0)
     {
         printf("Failed to start producer thread\n");
@@ -597,6 +708,8 @@ char test_thread_concurrent_get_put()
 
     pthread_join(producer_thread, NULL);
     pthread_join(consumer_thread, NULL);
+
+    printf("After join\n");
 
     free(testData);
     free(prodArgs);
@@ -625,7 +738,7 @@ char test_multthread_test()
         return -1;
     }
 
-    printf("Before build producers\n");
+    //printf("Before build producers\n");
 
     char testMessage[] = {'T', 'E', 'S', 'T', ' ', 'D', 'A', 'T', 'A', ':', ' ', 0, '_', 0, 0};
     char ** testData;
@@ -656,7 +769,7 @@ char test_multthread_test()
         //printf("G\n");
     }
 
-    printf("Before build consumers\n");
+    //printf("Before build consumers\n");
 
     // Build all consumer threads
     for (char i = 0; i < 8; i++)
@@ -667,7 +780,7 @@ char test_multthread_test()
         consArgs[i]->pArray = sharedArray;
     }
 
-    printf("Starting threads\n");
+    //printf("Starting threads\n");
 
     for(char i = 0; i < 8; i++)
     {
@@ -683,17 +796,17 @@ char test_multthread_test()
         }
     }
 
-    printf("Waiting for threads to exit\n");
+    //printf("Waiting for threads to exit\n");
 
     for(char i = 0; i < 8; i++)
     {
         pthread_join(producerThreads[i], NULL);
         pthread_join(consumerThreads[i], NULL);
 
-        printf("%i exited\n", i);
+        //printf("%i exited\n", i);
     }
 
-    printf("Freeing test resources\n");
+    //printf("Freeing test resources\n");
     
     for(char i = 0; i < 8; i++)
     {
@@ -706,10 +819,17 @@ char test_multthread_test()
         //printf("C\n");
     }
 
-    printf("Freeing array\n");
+    //printf("Freeing array\n");
 
     array_free(sharedArray);
     free(sharedArray);
 
     return 1;
+}
+
+int main()
+{
+    test_array_runAll();
+
+    return 0;
 }
