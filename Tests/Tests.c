@@ -8,6 +8,14 @@ void m_memset(char * arr, char val, size_t len)
     }
 }
 
+void m_memcpy(char * dest, char * source, int len)
+{
+    while (len--)
+    {
+        *(dest++) = *(source++);
+    }
+}
+
 char test_array_runAll()
 {
     char count = 0;
@@ -17,6 +25,8 @@ char test_array_runAll()
         count++;
         printf("test_array_initializeTest passed\n");
     }
+
+    return 0;
 
     if(test_array_put1())
     {
@@ -60,9 +70,15 @@ char test_array_runAll()
         printf("test_array_get3 passed\n");
     }
 
-    printf("Array tests: %i / %i passed\n", count, 8);
+    if(test_thread_concurrent_get_put())
+    {
+        count++;
+        printf("test_thread_concurrent_get_put passed\n");
+    }
 
-    return count == 5;
+    printf("Array tests: %i / %i passed\n", count, 10);
+
+    return count == 9;
 }
 
 // This makes sure the array is correctly initialized
@@ -70,11 +86,15 @@ char test_array_initializeTest()
 {
     printf("Starting array init test\n");
 
-    Array * array = (Array*)malloc(sizeof(array));
+    Array * array = (Array*)malloc(sizeof(array) + 1);
+
+    printf("A\n");
 
     char ret = array_init(array);
 
-    if(ret)
+    printf("B\n");
+
+    if(ret == 0)
     {
         if(array->buffer == NULL)
         {
@@ -102,7 +122,7 @@ char test_array_initializeTest()
 
     free(array);
 
-    return ret;
+    return ret == 0;
 }
 
 // Tests adding 1 string to the array
@@ -114,12 +134,15 @@ char test_array_put1()
 
     char testArr[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 0};
 
-    if(!array_init(array))
-        return 0;
-
-    if(!array_put(array, testArr))
+    if(array_init(array) != 0)
     {
-        printf("Array put test 1 failed when calling funct\n");
+        printf("Failed to init\n");
+        return 0;
+    }
+
+    if(array_put(array, testArr) != 0)
+    {
+        printf("Array put test 1 failed when calling put\n");
         array_free(array);
         free(array);
         return 0;
@@ -151,7 +174,7 @@ char test_array_put2()
 
     char * source = (char*)malloc(21);
 
-    if(!array_init(array))
+    if(array_init(array) != 0)
         return 0;
 
     for (char j = 1; j < 21; j++)
@@ -160,7 +183,7 @@ char test_array_put2()
     // Check adding to array
     for(char i = 0; i < ARRAY_SIZE; i++)
     {
-        if(!array_put(array, source))
+        if(array_put(array, source) != 0)
         {
             printf("Array put test 2 failed when calling funct on iter: %i\n", i);
             array_free(array);
@@ -200,7 +223,7 @@ char test_array_put3()
 
     char * source = (char*)malloc(21);
 
-    if(!array_init(array))
+    if(array_init(array) != 0)
         return 0;
 
     for (char j = 1; j < 21; j++)
@@ -209,7 +232,7 @@ char test_array_put3()
     // Check adding to array
     for(char i = 0; i < ARRAY_SIZE; i++)
     {
-        if(!array_put(array, source))
+        if(array_put(array, source) != 0)
         {
             printf("Array put test 2 failed when calling funct on iter: %i\n", i);
             array_free(array);
@@ -241,14 +264,14 @@ char test_array_put4()
 
     char * source = (char*)malloc(51);
 
-    if(!array_init(array))
+    if(array_init(array) != 0)
         return 0;
 
     for (char j = 1; j < 51; j++)
         source[j - 1] = j;
 
     // Check adding to array
-    if(!array_put(array, source))
+    if(array_put(array, source) != 0)
     {
         printf("Array put test 4 failed when calling put\n");
         array_free(array);
@@ -292,10 +315,10 @@ char test_array_get1()
     char * dest = (char*)malloc(21);
     m_memset(dest, 0, 21);
 
-    if(!array_init(array))
+    if(array_init(array) != 0)
         return 0;
 
-    if(!array_put(array, source))
+    if(array_put(array, source) != 0)
     {
         printf("Array get test 1 failed when calling put\n");
         array_free(array);
@@ -304,7 +327,7 @@ char test_array_get1()
         return 0;
     }
 
-    if(!array_get(array, &dest))
+    if(array_get(array, &dest) != 0)
     {
         printf("Array get test 1 failed when calling get\n");
         array_free(array);
@@ -345,7 +368,7 @@ char test_array_get2()
 
     char * source = (char*)malloc(20);
 
-    if(!array_init(array))
+    if(array_init(array) != 0)
         return 0;
 
     m_memset(array->buffer, -1, (ARRAY_SIZE * MAX_NAME_LENGTH));
@@ -355,7 +378,7 @@ char test_array_get2()
     {
         m_memset(source, i, 20);
 
-        if(!array_put(array, source))
+        if(array_put(array, source) != 0)
         {
             printf("Array put test 2 failed when calling put on iter: %i\n", i);
             array_free(array);
@@ -377,7 +400,7 @@ char test_array_get2()
     for(char i = 0; i < ARRAY_SIZE; i++)
     {
         m_memset(source, 0, 20);
-        if(!array_get(array, &source))
+        if(array_get(array, &source) != 0)
         {
             printf("Array put test 2 failed when calling get on iter: %i\n", i);
             array_free(array);
@@ -418,14 +441,14 @@ char test_array_get3()
 
     char * source = (char*)malloc(21);
 
-    if(!array_init(array))
+    if(array_init(array) != 0)
         return 0;
 
 
     for(char i = 1; i < 21; i++)
         source[i-1] = i;
 
-    if(!array_put(array, source))
+    if(array_put(array, source) != 0)
     {
         printf("Array put test 3 failed when calling put\n");
         array_free(array);
@@ -436,7 +459,7 @@ char test_array_get3()
 
     m_memset(source, 0, 20);
 
-    if(!array_get(array, &source))
+    if(array_get(array, &source) != 0)
     {
         printf("Array put test 3 failed when calling get\n");
         array_free(array);
@@ -458,7 +481,7 @@ char test_array_get3()
     for(char i = 21; i < 41; i++)
         source[i - 21] = i;
 
-    if(!array_put(array, source))
+    if(array_put(array, source) != 0)
     {
         printf("Array put test 3 failed when calling put 2\n");
         array_free(array);
@@ -467,8 +490,7 @@ char test_array_get3()
         return 0;
     }
 
-
-    if(!array_get(array, &source))
+    if(array_get(array, &source) != 0)
     {
         printf("Array put test 3 failed when calling get\n");
         array_free(array);
@@ -491,4 +513,88 @@ char test_array_get3()
     free(array);
     free(source);
     return 1;
+}
+
+void *test_producer_funct(void * pArgs)
+{
+    struct ProducerArgs * args = (ProducerArgs*)pArgs;
+
+    while (args->count > 0)
+    {
+        if(args->pArray->count == ARRAY_SIZE)
+            pthread_cond_wait(&args->pArray->space_available_cond, &args->pArray->mutex);
+
+        array_put(args->pArray, *args->source);
+        args->source++;
+        args->count--;
+    }
+
+    printf("Producer finished\n");
+}
+
+void *test_consumer_funct(void * pArgs)
+{
+    struct ConsumerArgs * args = (ConsumerArgs*)pArgs;
+
+    char * buffer = (char*)malloc(21);
+    while (args->count > 0)
+    {
+        if(args->pArray->count == 0)
+            pthread_cond_wait(&args->pArray->items_available_cond, &args->pArray->mutex);
+
+        array_get(args->pArray, &buffer);
+        args->count--;
+        printf("%s\n", buffer);
+    }
+    free(buffer);
+}
+
+char test_thread_concurrent_get_put()
+{
+    pthread_t producer_thread, consumer_thread;
+
+    Array * sharedArray = (Array*)malloc(sizeof(Array));
+
+    printf("Starting test_thread_concurrent_get_put\n");
+
+    if(array_init(sharedArray) != 0)
+    {
+        printf("Failed to initialize array\n");
+        return -1;
+    }
+
+    char testMessage[] = {'T', 'E', 'S', 'T', ' ', 'D', 'A', 'T', 'A', ':', ' ', 0};
+    char ** testData = (char**)malloc(sizeof(char*)*8);
+    for(char i = 0; i < 8; i++)
+    {
+        testData[i] = (char*)malloc(MAX_NAME_LENGTH);
+        m_memset(testData[i], 0, MAX_NAME_LENGTH);
+        m_memcpy(testData[i], testMessage, 11);
+        testData[i][11] = i + 0x30;
+    }
+
+    struct ProducerArgs * prodArgs = (ProducerArgs*)malloc(sizeof(ProducerArgs));
+    prodArgs->source = testData;
+
+    struct ConsumerArgs * consArgs = (ConsumerArgs*)malloc(sizeof(ConsumerArgs));
+
+    if(pthread_create( &producer_thread, NULL, test_producer_funct, (void*) prodArgs) != 0)
+    {
+        printf("Failed to start producer thread\n");
+        return -1;
+    }
+    if(pthread_create( &consumer_thread, NULL, test_consumer_funct, (void*) consArgs) != 0)
+    {
+        printf("Failed to start producer thread\n");
+        return -1;
+    }
+
+    pthread_join(producer_thread, NULL);
+    pthread_join(consumer_thread, NULL);
+
+    free(testData);
+    free(prodArgs);
+    free(consArgs);
+    array_free(sharedArray);
+    free(sharedArray);
 }

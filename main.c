@@ -10,21 +10,21 @@
 
 int main()
 {
-    printf("Hello\n");
+    printf("Started\n");
 
 #if TEST_BUILD == 1
     test_array_runAll();
 #endif
 
-    Array * sharedArray = (Array*)malloc(sizeof(Array));
+    // Array * sharedArray = (Array*)malloc(sizeof(Array));
 
-    if(!array_init(sharedArray))
-    {
-        printf("Failed to initialize array\n");
-        return 1;
-    }
+    // if(!array_init(sharedArray))
+    // {
+    //     printf("Failed to initialize array\n");
+    //     return 1;
+    // }
 
-    array_free(sharedArray);
+    // array_free(sharedArray);
 
     return 0;
 }

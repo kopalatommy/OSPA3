@@ -18,7 +18,22 @@ typedef struct Array
     char count;
     pthread_mutex_t mutex;
     pthread_mutexattr_t mutex_attr;
+    pthread_cond_t space_available_cond;
+    pthread_cond_t items_available_cond;
 } Array;
+
+typedef struct ProducerArgs
+{
+    char ** source;
+    int count;
+    Array * pArray;
+} ProducerArgs;
+
+typedef struct ConsumerArgs
+{
+    Array * pArray;
+    int count;
+} ConsumerArgs;
 
 int array_init(Array * pArray);
 

@@ -1,1 +1,1 @@
-gcc array.h array.c Tests/Tests.h Tests/Tests.c main.c -o a.out
+gcc array.h array.c Tests/Tests.h Tests/Tests.c main.c -g -O0 -lpthread -o a.out
