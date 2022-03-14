@@ -7,9 +7,6 @@ int array_init(Array * pArray)
         printf("array_init passed null pointer\n");
         return -1;
     }
-    printf("Array loc: %p\n", pArray);
-    printf("Mutex loc: %p\n", &pArray->mutex);
-    printf("Mutex attr loc: %p\n", &pArray->mutex_attr);
     if(pthread_mutexattr_init(&pArray->mutex_attr) == -1)
     {
         return -1;
@@ -21,14 +18,8 @@ int array_init(Array * pArray)
         return -1;
     }
 
-    printf("Initialized mutex\n");
-
-    printf("Allocating of size: %i\n", (ARRAY_SIZE * MAX_NAME_LENGTH));
-
     // Allocate buffer array
     pArray->buffer = (char*)malloc(160);
-
-    printf("Initialized buffer\n");
 
     // Initialize object values
     pArray->head = 0;
@@ -48,18 +39,27 @@ int array_init(Array * pArray)
 
 int array_put(Array * pArray, char * str)
 {
-    // If there is no space available in the array, then return -1 for a bad read
-    if (pArray->count == ARRAY_SIZE)
-    {
-        printf("Aray already full\n");
-        return -1;
-    }
-
+    //printf("Put locking mutex\n");
     // Attempt to lock the mutex
     if(pthread_mutex_lock(&pArray->mutex) != 0)
     {
         printf("Failed to lock mutex: %i\n", pthread_mutex_lock(&pArray->mutex));
         return -1;
+    }
+
+    // If there is no space available in the array, then return -1 for a bad read
+    if (pArray->count == ARRAY_SIZE)
+    {
+        pthread_mutex_unlock(&pArray->mutex);
+        return -1;
+    }
+
+    //printf("Put after locking mutex\n");
+    //printf("put open\n");
+
+    if(pArray->tail * MAX_NAME_LENGTH >= (MAX_NAME_LENGTH * ARRAY_SIZE))
+    {
+        printf("Array out of bounds\n");
     }
 
     // Go to the next write location in the buffer
@@ -76,37 +76,52 @@ int array_put(Array * pArray, char * str)
 
     pArray->head = (pArray->head + 1) % (ARRAY_SIZE);
 
+    //printf("put close\n");
+
     // Release the mutex
     pthread_mutex_unlock(&pArray->mutex);
-    pthread_cond_signal(&pArray->items_available_cond);
 
     return 0;
 }
 
 int array_get(Array * pArray, char ** pStr)
 {
-    // If the array is empty, then return the fail value
-    if (pArray->count == 0)
-        return -1;
-
+    //printf("Get locking mutex\n");
     // Attempt to lock the mutex
     if(pthread_mutex_lock(&pArray->mutex) != 0)
     {
         printf("Failed to lock mutex: %i\n", pthread_mutex_lock(&pArray->mutex));
         return -1;
     }
+    //printf("Get after locking mutex\n");
 
+    // If the array is empty, then return the fail value
+    if (pArray->count == 0)
+    {
+        pthread_mutex_unlock(&pArray->mutex);
+        return -1;
+    }
+
+    //printf("Get open\n");
+
+    if(pArray->tail * MAX_NAME_LENGTH >= (MAX_NAME_LENGTH * ARRAY_SIZE))
+    {
+        printf("Array out of bounds\n");
+    }
     char * buffer = pArray->buffer + (pArray->tail * MAX_NAME_LENGTH);
     char * dest = *pStr;
     for(char i = 0; i < MAX_NAME_LENGTH; i++)
         *dest++ = *buffer++;
 
-    pArray->tail = pArray->tail + 1 % (ARRAY_SIZE - 1);
+    //pArray->tail = pArray->tail - 1 >= 0 ? pArray->tail - 1 : (ARRAY_SIZE - 1);
+    pArray->tail = (pArray->tail + 1) % (ARRAY_SIZE);
     pArray->count--;
 
+    //printf("get close\n");
+
     // Release the mutex
+    //printf("Get unlocking mutex\n");
     pthread_mutex_unlock(&pArray->mutex);
-    pthread_cond_signal(&pArray->space_available_cond);
 
     return 0;
 }

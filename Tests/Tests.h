@@ -34,4 +34,6 @@ char test_array_get3();
 
 char test_thread_concurrent_get_put();
 
+char test_multthread_test();
+
 #endif // _TESTS_H_

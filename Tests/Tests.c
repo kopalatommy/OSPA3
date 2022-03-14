@@ -26,8 +26,6 @@ char test_array_runAll()
         printf("test_array_initializeTest passed\n");
     }
 
-    return 0;
-
     if(test_array_put1())
     {
         count++;
@@ -76,6 +74,12 @@ char test_array_runAll()
         printf("test_thread_concurrent_get_put passed\n");
     }
 
+    if(test_multthread_test())
+    {
+        count++;
+        printf("test_multthread_test passed\n");
+    }
+
     printf("Array tests: %i / %i passed\n", count, 10);
 
     return count == 9;
@@ -86,13 +90,9 @@ char test_array_initializeTest()
 {
     printf("Starting array init test\n");
 
-    Array * array = (Array*)malloc(sizeof(array) + 1);
-
-    printf("A\n");
+    Array * array = (Array*)malloc(sizeof(Array));
 
     char ret = array_init(array);
-
-    printf("B\n");
 
     if(ret == 0)
     {
@@ -414,6 +414,14 @@ char test_array_get2()
             if(source[j] != i)
             {
                 printf("Array get test 2 failed. Received unexpectd value\n");
+                printf("Offender: source[%i] on iter %i\n", j, i);
+                printf("Received: ");
+                for(char k = 0; k < 20; k++)
+                {
+                    printf("%i ", source[k]);
+                }
+                printf("\n");
+
                 for(unsigned char k = 0; k < (MAX_NAME_LENGTH * ARRAY_SIZE); k++)
                 {
                     printf("%i : %i\n", k, array->buffer[k]);
@@ -521,10 +529,7 @@ void *test_producer_funct(void * pArgs)
 
     while (args->count > 0)
     {
-        if(args->pArray->count == ARRAY_SIZE)
-            pthread_cond_wait(&args->pArray->space_available_cond, &args->pArray->mutex);
-
-        array_put(args->pArray, *args->source);
+        while(array_put(args->pArray, *args->source) == -1);
         args->source++;
         args->count--;
     }
@@ -539,14 +544,13 @@ void *test_consumer_funct(void * pArgs)
     char * buffer = (char*)malloc(21);
     while (args->count > 0)
     {
-        if(args->pArray->count == 0)
-            pthread_cond_wait(&args->pArray->items_available_cond, &args->pArray->mutex);
-
-        array_get(args->pArray, &buffer);
+        while(array_get(args->pArray, &buffer) == -1);
         args->count--;
         printf("%s\n", buffer);
     }
     free(buffer);
+
+    printf("Consumer finished\n");
 }
 
 char test_thread_concurrent_get_put()
@@ -575,15 +579,19 @@ char test_thread_concurrent_get_put()
 
     struct ProducerArgs * prodArgs = (ProducerArgs*)malloc(sizeof(ProducerArgs));
     prodArgs->source = testData;
+    prodArgs->pArray = sharedArray;
+    prodArgs->count = 8;
 
     struct ConsumerArgs * consArgs = (ConsumerArgs*)malloc(sizeof(ConsumerArgs));
+    consArgs->count = 8;
+    consArgs->pArray = sharedArray;
 
-    if(pthread_create( &producer_thread, NULL, test_producer_funct, (void*) prodArgs) != 0)
+    if(pthread_create( &consumer_thread, NULL, test_consumer_funct, (void*) consArgs) != 0)
     {
         printf("Failed to start producer thread\n");
         return -1;
     }
-    if(pthread_create( &consumer_thread, NULL, test_consumer_funct, (void*) consArgs) != 0)
+    if(pthread_create( &producer_thread, NULL, test_producer_funct, (void*) prodArgs) != 0)
     {
         printf("Failed to start producer thread\n");
         return -1;
@@ -597,4 +605,107 @@ char test_thread_concurrent_get_put()
     free(consArgs);
     array_free(sharedArray);
     free(sharedArray);
+
+    return 1;
+}
+
+char test_multthread_test()
+{
+    printf("Starting multi thread test\n");
+
+    pthread_t producerThreads[8];
+    pthread_t consumerThreads[8];
+
+    struct ProducerArgs * prodArgs[8];
+    struct ConsumerArgs * consArgs[8];
+    
+    Array * sharedArray = (Array*)malloc(sizeof(Array));    
+
+    if(array_init(sharedArray) != 0)
+    {
+        printf("Failed to initialize array\n");
+        return -1;
+    }
+
+    printf("Before build producers\n");
+
+    char testMessage[] = {'T', 'E', 'S', 'T', ' ', 'D', 'A', 'T', 'A', ':', ' ', 0, '_', 0, 0};
+    char ** testData;
+    // Build all producer threads
+    for (char i = 0; i < 8; i++)
+    {
+        //printf("%i\n", i);
+        prodArgs[i] = (ProducerArgs *)malloc(sizeof(ProducerArgs));
+        //printf("A\n");
+        testData = (char**)malloc(sizeof(char*)*8);
+        //printf("B\n");
+        testMessage[11] = i + 0x30;
+        //printf("C\n");
+        for(char j = 0; j < 8; j++)
+        {
+            testData[j] = (char*)malloc(MAX_NAME_LENGTH);
+            m_memset(testData[j], 0, MAX_NAME_LENGTH);
+            m_memcpy(testData[j], testMessage, 14);
+            testData[j][13] = j + 0x30;
+            //printf("Producer %i str %i: %s\n", i, j, testData[j]);
+        }
+        //printf("D\n");
+        prodArgs[i]->source = testData;
+        //printf("E\n");
+        prodArgs[i]->pArray = sharedArray;
+        //printf("F\n");
+        prodArgs[i]->count = 8;
+        //printf("G\n");
+    }
+
+    printf("Before build consumers\n");
+
+    // Build all consumer threads
+    for (char i = 0; i < 8; i++)
+    {
+        //printf("%i\n", i);
+        consArgs[i] = (ConsumerArgs*)malloc(sizeof(ConsumerArgs));
+        consArgs[i]->count = 8;
+        consArgs[i]->pArray = sharedArray;
+    }
+
+    printf("Starting threads\n");
+
+    for(char i = 0; i < 8; i++)
+    {
+        if(pthread_create( &consumerThreads[i], NULL, test_consumer_funct, (void*) consArgs[i]) != 0)
+        {
+            printf("Failed to start producer thread\n");
+            return -1;
+        }
+        if(pthread_create( &producerThreads[i], NULL, test_producer_funct, (void*) prodArgs[i]) != 0)
+        {
+            printf("Failed to start producer thread\n");
+            return -1;
+        }
+    }
+
+    printf("Waiting for threads to exit\n");
+
+    for(char i = 0; i < 8; i++)
+    {
+        pthread_join(producerThreads[i], NULL);
+        pthread_join(consumerThreads[i], NULL);
+
+        printf("%i exited\n", i);
+    }
+
+    pthread_exit(NULL);
+    
+    for(char i = 0; i < 8; i++)
+    {
+        free(prodArgs[i]->source);
+        free(prodArgs[i]);
+        free(consArgs[i]);
+    }
+
+    array_free(sharedArray);
+    free(sharedArray);
+
+    return 1;
 }
