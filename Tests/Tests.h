@@ -6,6 +6,19 @@
 
 #include "../array.h"
 
+typedef struct ProducerArgs
+{
+    char ** source;
+    int count;
+    Array * pArray;
+} ProducerArgs;
+
+typedef struct ConsumerArgs
+{
+    Array * pArray;
+    int count;
+} ConsumerArgs;
+
 char test_array_runAll();
 
 // This makes sure the array is correctly initialized

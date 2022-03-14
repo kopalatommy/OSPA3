@@ -20,61 +20,61 @@ char test_array_runAll()
 {
     char count = 0;
 
-    if(test_array_initializeTest())
+    if(test_array_initializeTest() == 1)
     {
         count++;
         printf("test_array_initializeTest passed\n");
     }
 
-    if(test_array_put1())
+    if(test_array_put1() == 1)
     {
         count++;
         printf("test_array_put1 passed\n");
     }
 
-    if(test_array_put2())
+    if(test_array_put2() == 1)
     {
         count++;
         printf("test_array_put2 passed\n");
     }
 
-    if(test_array_put3())
+    if(test_array_put3() == 1)
     {
         count++;
         printf("test_array_put3 passed\n");
     }
 
-    if(test_array_put4())
+    if(test_array_put4() == 1)
     {
         count++;
         printf("test_array_put4 passed\n");
     }
 
-    if(test_array_get1())
+    if(test_array_get1() == 1)
     {
         count++;
         printf("test_array_get1 passed\n");
     }
 
-    if(test_array_get2())
+    if(test_array_get2() == 1)
     {
         count++;
         printf("test_array_get2 passed\n");
     }
 
-    if(test_array_get3())
+    if(test_array_get3() == 1)
     {
         count++;
         printf("test_array_get3 passed\n");
     }
 
-    if(test_thread_concurrent_get_put())
+    if(test_thread_concurrent_get_put() == 1)
     {
         count++;
         printf("test_thread_concurrent_get_put passed\n");
     }
 
-    if(test_multthread_test())
+    if(test_multthread_test() == 1)
     {
         count++;
         printf("test_multthread_test passed\n");
@@ -82,7 +82,7 @@ char test_array_runAll()
 
     printf("Array tests: %i / %i passed\n", count, 10);
 
-    return count == 9;
+    return count == 10;
 }
 
 // This makes sure the array is correctly initialized
@@ -527,11 +527,9 @@ void *test_producer_funct(void * pArgs)
 {
     struct ProducerArgs * args = (ProducerArgs*)pArgs;
 
-    while (args->count > 0)
+    for(char i = 0; i < args->count; i++)
     {
-        while(array_put(args->pArray, *args->source) == -1);
-        args->source++;
-        args->count--;
+        while(array_put(args->pArray, *(args->source + i)) == -1);
     }
 
     printf("Producer finished\n");
@@ -695,14 +693,20 @@ char test_multthread_test()
         printf("%i exited\n", i);
     }
 
-    pthread_exit(NULL);
+    printf("Freeing test resources\n");
     
     for(char i = 0; i < 8; i++)
     {
+        //printf("%i\n", i);
         free(prodArgs[i]->source);
+        //printf("A\n");
         free(prodArgs[i]);
+        //printf("B\n");
         free(consArgs[i]);
+        //printf("C\n");
     }
+
+    printf("Freeing array\n");
 
     array_free(sharedArray);
     free(sharedArray);

@@ -131,3 +131,18 @@ void array_free(Array * pArray)
     pthread_mutex_destroy(&pArray->mutex);
     free(pArray->buffer);
 }
+
+void semaphore_init(Semaphore * semaphore)
+{
+    semaphore->waiting = (pthread_t*)malloc(sizeof(pthread_t) * MAX_THREADS);
+    return semaphore->waiting != NULL ? 0 : -1;
+}
+
+void semaphore_wait(Semaphore * semaphore);
+
+void semaphore_signal(Semaphore * semaphore);
+
+void semaphore_sleep(Semaphore * semaphore)
+{
+
+}
