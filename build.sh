@@ -1,1 +1,1 @@
-gcc array.h array.c test.c -g -O0 -lpthread -o a.out
+gcc array.h array.c multi-lookup.c multi-lookup.h -g -O0 -lpthread -o multi-lookup

@@ -15,6 +15,7 @@ typedef struct Semaphore {
     int counter;
     pthread_mutex_t ** waiting;
     int waitingCount;
+    int arrayCount;
 } Semaphore;
 
 typedef struct Array
