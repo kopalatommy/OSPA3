@@ -6,6 +6,15 @@ void producer_args_init(ProducerArgs * pArgs, FILE * logFile, pthread_mutex_t * 
     pArgs->logFile = logFile;
     pArgs->sharedArray = pArray;
 
+    pArgs->sourceFileNames = (char**)malloc(sizeof(char*)*numFiles);
+    //printf("%p count: %i\n", pArgs, numFiles);
+    for(int i = 0; i < numFiles; i++)
+    {
+        pArgs->sourceFileNames[i] = (char*)malloc(strlen(fileNames[i]) + 1);
+        strcpy(pArgs->sourceFileNames[i], fileNames[i]);
+        //printf("%p - %s\n", pArgs, pArgs->sourceFileNames[i]);
+    }
+
     pArgs->sourceFileNames = fileNames;
     pArgs->numSourceFiles = numFiles;
 
@@ -35,6 +44,8 @@ void * producer_work(void * pArgs)
     char buffer[MAX_NAME_LENGTH];
     memset(buffer, 0, 20);
 
+    int count = 0;
+
     FILE * sourceFile = NULL;
     for(int i = 0; i < args->numSourceFiles; i++)
     {
@@ -45,6 +56,8 @@ void * producer_work(void * pArgs)
             printf("%p failed to open %s\n", args, args->sourceFileNames[i]);
             continue;
         }
+        // else
+        //     printf("%p servicing %s\n", args, args->sourceFileNames[i]);
 
         //printf("%p - %s\n", args, args->sourceFileNames[i]);
 
@@ -54,10 +67,14 @@ void * producer_work(void * pArgs)
             len = strlen(buffer);
             if(len > 0)
                 buffer[len-1] = 0;
+            else
+                continue;
+            count++;
 
             //printf("%p read %s\n", args, buffer);
 
-            sem_wait(&args->sharedArray->produceSemaphore);
+            if(sem_wait(&args->sharedArray->produceSemaphore) != 0)
+                continue;
 
             if(array_put(args->sharedArray, buffer))
             {
@@ -81,6 +98,7 @@ void * producer_work(void * pArgs)
         fclose(sourceFile);
     }
 
+    //printf("thread %lx serviced %i files %i entries\n", *args->threadID, args->numSourceFiles, count);
     printf("thread %lx serviced %i files\n", *args->threadID, args->numSourceFiles);
 
     return (void*)-1;
@@ -105,7 +123,11 @@ void * consumer_work(void * pArgs)
     while((*args->finishedByte == 0) || (array_count(args->sharedArray) > 0))
     {
         //printf("Consumer top of loop\n");
-        sem_wait(&args->sharedArray->consumeSemaphore);
+        if(sem_wait(&args->sharedArray->consumeSemaphore) != 0)
+        {
+            printf("Consumer failed to wait on consume semaphore\n");
+            continue;
+        }
 
         if(array_get(args->sharedArray, &buffer))
         {
@@ -115,7 +137,7 @@ void * consumer_work(void * pArgs)
 
         sem_post(&args->sharedArray->produceSemaphore);
 
-        if (dnslookup(buffer, ipBuffer, MAX_NAME_LENGTH) == UTIL_SUCCESS)
+        if (dnslookup(buffer, ipBuffer, MAX_IP_LENGTH) == UTIL_SUCCESS)
         {
             if(pthread_mutex_lock(args->fileMutex) != 0)
             {
@@ -209,8 +231,8 @@ int main(int argc, char *argv[])
         printf("Failed to init shared array\n");
     }
 
-    int numConsumers = atoi(argv[1]);
-    int numProducers = atoi(argv[2]);
+    int numProducers = atoi(argv[1]);
+    int numConsumers = atoi(argv[2]);
 
     if (numConsumers > MAX_RESOLVER_THREADS)
         numConsumers = MAX_RESOLVER_THREADS;
@@ -236,19 +258,31 @@ int main(int argc, char *argv[])
     }
     
     //printf("Num files: %i\n", numFiles);
-    int numFilesPerThread = numFiles/numProducers;
-    int remainder = numFiles%numProducers;
+    int numFilesPerThread;
+    int remainder;
+
+    if(numProducers <= 0)
+    {
+        numFilesPerThread = 0;
+        remainder = 0;
+    }
+    else
+    {
+        numFilesPerThread = numFiles/numProducers;
+        remainder = numFiles%numProducers;
+    }
+
     //printf("Num files per thread: %i\nRemainder: %i\n", numFilesPerThread, remainder);
     //printf("Num files per thread: %i, remainder: %i\n", numFilesPerThread, numFiles%numProducers);
     argv += 5;
     for(int i = 0; i < numProducers; i++)
     {
-        producer_args_init(&producerArgs[i], producerLog, &producerMutex, &sharedArray, argv++, numFilesPerThread, &producerThreads[i]);
+        producer_args_init(&producerArgs[i], producerLog, &producerMutex, &sharedArray, argv, numFilesPerThread, &producerThreads[i]);
+        argv += numFilesPerThread;
         if(i < remainder)
         {
             producerArgs[i].numSourceFiles++;
             argv++;
-            producerArgs[i].sourceFileNames++;
         }
     }
 
@@ -303,11 +337,12 @@ int main(int argc, char *argv[])
                 break;
             }
         }
-        for(int i = 0; i < numConsumers; i++)
-        {
-            pthread_join(consumerThreads[i], NULL);
-            //printf("Producer %i / %i exited\n", i + 1, numProducers);
-        }
+    }
+
+    for(int i = 0; i < numConsumers; i++)
+    {
+        pthread_join(consumerThreads[i], NULL);
+        //printf("Producer %i / %i exited\n", i + 1, numProducers);
     }
     
     fclose(producerLog);
