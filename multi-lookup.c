@@ -1,381 +1,319 @@
 #include "multi-lookup.h"
 
-char requester_args_init(RequesterArgs* args, int numberOfSourceFiles)
+void producer_args_init(ProducerArgs * pArgs, FILE * logFile, pthread_mutex_t * mutex, Array * pArray, char** fileNames, int numFiles, pthread_t * threadID)
 {
-    args->numSourceFiles = numberOfSourceFiles;
+    pArgs->fileMutex = mutex;
+    pArgs->logFile = logFile;
+    pArgs->sharedArray = pArray;
 
-    return 0;
+    pArgs->sourceFileNames = fileNames;
+    pArgs->numSourceFiles = numFiles;
+
+    pArgs->threadID = threadID;
 }
 
-void requester_args_free(RequesterArgs* args)
+void consumer_args_init(ConsumerArgs * pArgs, FILE * logFile, pthread_mutex_t * mutex, Array * pArray, char* finishedByte, pthread_t * threadID)
 {
-    free(args->sourceFileNames);
+    pArgs->fileMutex = mutex;
+    pArgs->logFile = logFile;
+    pArgs->sharedArray = pArray;
+    pArgs->finishedByte = finishedByte;
+
+    pArgs->threadID = threadID;
 }
 
-void* requester_run(void* pArgs)
+void * producer_work(void * pArgs)
 {
-    //printf("Started requester: %p\n", pArgs);
+    ProducerArgs* args = (ProducerArgs*)pArgs;
 
-    struct RequesterArgs * args = (RequesterArgs*)pArgs;
-
-    if (args == NULL)
+    if(args == NULL)
     {
-        printf("Thread received bad args: %p\n", pArgs);
+        printf("Received bad args\n");
         return (void*)-1;
     }
 
-    char * buffer = (char*)malloc(MAX_NAME_LENGTH);
-    size_t len = 0;
+    char buffer[MAX_NAME_LENGTH];
+    memset(buffer, 0, 20);
 
-    pthread_mutex_t waitMutex;
-    pthread_mutexattr_t mutex_attr;
-    if(pthread_mutexattr_init(&args->sharedArray->mutex_attr) == -1)
-    {
-        printf("Producer failed to init mutex attr\n");
-        return (void*)-1;
-    }
-    if(pthread_mutex_init(&waitMutex, &args->sharedArray->mutex_attr) == -1)
-    {
-        printf("Producer failed to init mutex\n");
-        return (void*)-1;
-    }
-
-    //printf("Requester finished init: %p\n", pArgs);
-    
-    //printf("Reading %i files\n", args->numSourceFiles);
-    /*for(int i = 0; i < args->numSourceFiles; i++)
-        printf("%i : %s\n", i, args->sourceFileNames[i]);*/
-
+    FILE * sourceFile = NULL;
     for(int i = 0; i < args->numSourceFiles; i++)
     {
-        printf("Opening file: %s\n", args->sourceFileNames[i]);
-        FILE * source = fopen(args->sourceFileNames[i], "r");
-        if(source == NULL)
+        sourceFile = fopen(args->sourceFileNames[i], "r");
+
+        if(sourceFile == NULL)
         {
-            printf("Failed to open source file: %s\n", args->sourceFileNames[i]);
+            printf("%p failed to open %s\n", args, args->sourceFileNames[i]);
             continue;
         }
 
-        //while (getline(&buffer, &len, source) != -1)
-        while(fgets(buffer, MAX_NAME_LENGTH, source) != NULL)
+        //printf("%p - %s\n", args, args->sourceFileNames[i]);
+
+        int len;
+        while(fgets(buffer, MAX_NAME_LENGTH, sourceFile) != NULL)
         {
-            // if(buffer[len-2] == 10 || buffer[len-2] == 13)
-            //     buffer[len - 2] = 0;
-            printf("Put: %s from %s\n", buffer, args->sourceFileNames[i]);
+            len = strlen(buffer);
+            if(len > 0)
+                buffer[len-1] = 0;
 
-            semaphore_wait(&args->sharedArray->produceSemaphore, &waitMutex);
+            //printf("%p read %s\n", args, buffer);
 
-            if(array_put(args->sharedArray, buffer) == -1)
+            sem_wait(&args->sharedArray->produceSemaphore);
+
+            if(array_put(args->sharedArray, buffer))
             {
-                printf("Producer failed to put\n");
+                printf("Failed to put in shared array\n");
+                continue;
             }
-            else
-                semaphore_signal(&args->sharedArray->consumeSemaphore);
 
-            semaphore_wait(args->logFileSemaphore, &waitMutex);
-            fputs(buffer, args->logFile);
-            semaphore_signal(args->logFileSemaphore);
+            sem_post(&args->sharedArray->consumeSemaphore);
+
+            if(pthread_mutex_lock(args->fileMutex) != 0)
+            {
+                printf("Failed to lock mutex\n");
+                continue;
+            }
+
+            fprintf(args->logFile, "%s\n", buffer);
+
+            pthread_mutex_unlock(args->fileMutex);
         }
-        printf("Finished file\n");
-        
-        fclose(source);
+
+        fclose(sourceFile);
     }
 
-    printf("Finished requester thread\n");
+    printf("thread %lx serviced %i files\n", *args->threadID, args->numSourceFiles);
 
-    free(buffer);
+    return (void*)-1;
 }
 
-char resolver_args_init(ResolverArgs* args)
+void * consumer_work(void * pArgs)
 {
-    return 0;
-}
+    ConsumerArgs* args = (ConsumerArgs*)pArgs;
 
-void resolver_args_free(ResolverArgs* args)
-{
-
-}
-
-void* resolver_run(void* pArgs)
-{
-    ResolverArgs * args = (ResolverArgs*)pArgs;
-
-    printf("Started resolver\n");
-
-    pthread_mutex_t waitMutex;
-    pthread_mutexattr_t mutex_attr;
-    if(pthread_mutexattr_init(&args->sharedArray->mutex_attr) == -1)
+    if(args == NULL)
     {
-        printf("Producer failed to init mutex attr\n");
+        printf("Received bad args\n");
         return (void*)-1;
     }
-    if(pthread_mutex_init(&waitMutex, &args->sharedArray->mutex_attr) == -1)
-    {
-        printf("Producer failed to init mutex\n");
-        return (void*)-1;
-    }
-
-    pthread_mutex_lock(&waitMutex);
 
     char * buffer = (char*)malloc(MAX_NAME_LENGTH);
-    char ret;
-    while ((*args->finished == 0) || (args->sharedArray->count > 0))
+    memset(buffer, 0, 20);
+    char * ipBuffer = (char*)malloc(MAX_IP_LENGTH);
+    memset(ipBuffer, 0, 20);
+
+    int servicedCount = 0;
+    while((*args->finishedByte == 0) || (array_count(args->sharedArray) > 0))
     {
-        printf("Finished byte: %i, array count: %i\n", *args->finished, args->sharedArray->count);
-        printf("Exit: %i\n", (!(*args->finished) || args->sharedArray->count > 0) ? 0 : 1);
-        printf("args->finished: %i\n", *args->finished);
-        printf("args->sharedArray->count: %i\n", args->sharedArray->count);
-        printf("args->sharedArray->count > 0: %i\n", (args->sharedArray->count > 0) ? 1 : 0);
+        //printf("Consumer top of loop\n");
+        sem_wait(&args->sharedArray->consumeSemaphore);
 
-        printf("Consume semaphore value: %i\n", args->sharedArray->consumeSemaphore.counter);
-        semaphore_wait(&args->sharedArray->consumeSemaphore, &waitMutex);
-
-        if((ret = array_get(args->sharedArray, &buffer)) != 0)
+        if(array_get(args->sharedArray, &buffer))
         {
-            printf("Consumer failed to get: %i\n", ret);
+            printf("Failed to put in shared array\n");
             continue;
         }
-        semaphore_signal(&args->sharedArray->produceSemaphore);
-        
-        semaphore_wait(args->logFileSemaphore, &waitMutex);
-        if(fputs(buffer, args->logFile) <= 0)
-            printf("Resolver failed to write to log file\n");
-        semaphore_signal(args->logFileSemaphore);
-        printf("Read: %s \n", buffer);
+
+        sem_post(&args->sharedArray->produceSemaphore);
+
+        if (dnslookup(buffer, ipBuffer, MAX_NAME_LENGTH) == UTIL_SUCCESS)
+        {
+            if(pthread_mutex_lock(args->fileMutex) != 0)
+            {
+                printf("Failed to lock mutex\n");
+                continue;
+            }
+            
+            fprintf(args->logFile, "%s, %s\n", buffer, ipBuffer);
+            servicedCount++;
+
+            pthread_mutex_unlock(args->fileMutex);
+        }
+        else
+        {
+            if(pthread_mutex_lock(args->fileMutex) != 0)
+            {
+                printf("Failed to lock mutex\n");
+                continue;
+            }
+            
+            fprintf(args->logFile, "%s, NOT_RESOLVED\n", buffer);
+            servicedCount++;
+
+            pthread_mutex_unlock(args->fileMutex);
+        }
     }
+
     free(buffer);
+    free(ipBuffer);
 
-    printf("resolver finished\n");
-}
+    printf("thread %lx resolved %i hostnames\n", *args->threadID, servicedCount);
 
-void print_args(RequesterArgs * args, int i)
-{
-    printf("\n");
-    printf("\nRequester Args %i : %p\n", i, args);
-    printf("Shared array: %p\n", args->sharedArray);
-    printf("Log file: %p\n", args->logFile);
-    printf("Log file semaphore: %p\n", args->logFileSemaphore);
-    printf("Num source files: %i\n", args->numSourceFiles);
-    printf("Source files pointer: %p\n", args->sourceFileNames);
-    for(int j = 0; j < args->numSourceFiles; j++)
-        printf("%s\n", args->sourceFileNames[j]);
-    printf("\n");
-}
-
-char build_requesters(int* numRequesters, char * logFileName, struct Array * sharedArray, FILE ** requesterFile, pthread_t ** pRequesterThreads, struct RequesterArgs ** pRequesterArgs, int numSource, char**sourceNames, Semaphore * logFileSemaphore)
-{
-    if(*numRequesters > numSource)
-    {
-        printf("More requesters than source files. Resizing\n");
-        *numRequesters = numSource;
-    }
-
-    *requesterFile = fopen(logFileName, "w");
-    if(requesterFile == NULL)
-    {
-        printf("Failed to open requester log file: %s\n", logFileName);
-        return -1;
-    }
-    // else
-    //     printf("Opened requester log file\n");
-
-    pthread_t *requesterThreads = (pthread_t*)malloc(sizeof(pthread_t)*(*numRequesters));
-
-    struct RequesterArgs * requesterArgs = (struct RequesterArgs*)malloc(sizeof(struct RequesterArgs)*(*numRequesters));
-
-    //*requesterArgs = (RequesterArgs*)malloc(sizeof(RequesterArgs*)*numRequesters);
-
-    int counter = 0;
-    int numFiles = numSource / (*numRequesters);
-    int numAdditional = numSource % (*numRequesters);
-    int numRequest = 0;
-    printf("Num files per thread: %i, remaining: %i\n", numFiles, numAdditional);
-    for(int i = 0; i < (*numRequesters); i++)
-    {
-        //requesterArgs[i] = (RequesterArgs)malloc(sizeof(RequesterArgs));
-        //printf("Creating requester %i with args: %p\n", i, &requesterArgs[i]);
-
-        numRequest = numFiles + (i < numAdditional ? 1 : 0);
-
-        requesterArgs[i].logFile = *requesterFile;
-        requesterArgs[i].logFileSemaphore = logFileSemaphore;
-        requesterArgs[i].sourceFileNames = (char**)malloc(numRequest*sizeof(char*));
-        requesterArgs[i].numSourceFiles = numRequest;
-        requesterArgs[i].sharedArray = sharedArray;
-
-        for(int j = 0; j < numRequest; j++)
-        {
-            requesterArgs[i].sourceFileNames[j] = (char*)malloc(MAX_NAME_LENGTH);
-            strcpy(requesterArgs[i].sourceFileNames[j], sourceNames[counter]);
-            counter++;
-        }
-    }
-
-    for (int i = 0; i < (*numRequesters); i++)
-    {
-        //print_args(&requesterArgs[i], i);
-
-        if(pthread_create(&requesterThreads[i], NULL, requester_run, (void*) &requesterArgs[i]) != 0)
-        {
-            printf("Failed to start requester thread: %i\n", i);
-            return -1;
-        }
-    }
-
-    *pRequesterArgs = requesterArgs;
-    *pRequesterThreads = requesterThreads;
-
-    printf("Started all requester threads\n");
-
-    return 0;
-}
-
-char build_resolvers(int numResolvers, char * logFileName, Array * sharedArray, FILE ** resolverFile, char * finished, pthread_t ** resolverThreads, ResolverArgs ** resolverArgs, Semaphore * logFileSemaphore)
-{
-    *resolverFile = fopen(logFileName, "w");
-    if(resolverFile == NULL)
-    {
-        printf("Failed to open resolver log file: %s\n", logFileName);
-        return -1;
-    }
-
-    *resolverThreads = (pthread_t*)malloc(sizeof(pthread_t)*numResolvers);
-
-    *resolverArgs = (ResolverArgs*)malloc(sizeof(ResolverArgs)*numResolvers);
-    for(int i = 0; i < numResolvers; i++)
-    {
-        resolverArgs[i] = (ResolverArgs*)malloc(sizeof(ResolverArgs));
-        if(resolver_args_init(resolverArgs[i]) != 0)
-        {
-            printf("Failed to init resolver arg: %i\n", i);
-            return -1;
-        }
-        resolverArgs[i]->finished = finished;
-        resolverArgs[i]->logFile = *resolverFile;
-        resolverArgs[i]->logFileSemaphore = logFileSemaphore;
-        resolverArgs[i]->sharedArray = sharedArray;
-
-        if(pthread_create( resolverThreads[i], NULL, resolver_run, (void*) resolverArgs[i]) != 0)
-        {
-            printf("Failed to start resolver thread: %i\n", i);
-            return -1; 
-        }
-    }
-
-    return 0;
+    return (void*)-1;
 }
 
 int main(int argc, char *argv[])
 {
-    FILE * requesterLogFile;
-    pthread_t * requesterThreads;
-    RequesterArgs * requesterArgs;
-    Semaphore requesterSemaphore;
-
-    FILE * resolverLogFile;
-    pthread_t * resolverThreads;
-    ResolverArgs * resolverArgs;
-    Semaphore resolverSemaphore;
-
-    char finishedByte =  0;
+    struct timeval startTime;
+    struct timeval endTime;
 
     if(argc < 6)
-    {
-        printf("Not enough args passed. Expecting >= 6. Received: %i\n", argc);
         return -1;
+
+    gettimeofday(&startTime, NULL);
+
+    FILE * producerLog = fopen(argv[3], "w");
+    if(producerLog == NULL)
+    {
+        printf("Failed to open producer log\n");
+        exit(1);
+    }
+    FILE * consumerLog = fopen(argv[4], "w");
+    if(consumerLog == NULL)
+    {
+        printf("Failed to open consumer log\n");
+        exit(1);
     }
 
-    int numRequesters = atoi(argv[1]);
-    int numResolvers = atoi(argv[2]);
+    char finishedByte = 0;
 
-    if(numRequesters < 0)
+    pthread_mutexattr_t consumerMutexAttr;
+    pthread_mutex_t consumerMutex;
+
+    pthread_mutexattr_t producerMutexAttr;
+    pthread_mutex_t producerMutex;
+
+    if(pthread_mutexattr_init(&consumerMutexAttr) != 0)
     {
-        printf("numRequesters < 0\n");
-        return -1;
+        printf("Failed to init mutex attr\n");
+        exit(-1);
     }
-    if(numResolvers < 0)
+    if(pthread_mutex_init(&consumerMutex, &consumerMutexAttr) != 0)
     {
-        printf("numResolvers < 0\n");
-        return -1;
+        printf("Failed to init mutex\n");
+        exit(-2);
     }
-
-    char * requesterLog = argv[3];
-    char * resolverLog = argv[4];
-
-    printf("Num args: %i\n", argc);
-
-    printf("Num requester threads: %i\n", numRequesters);
-    printf("Num resolvers threads: %i\n", numResolvers);
-
-    printf("Requester log: %s\n", requesterLog);
-    printf("Resolver log: %s\n", resolverLog);
+    if(pthread_mutexattr_init(&producerMutexAttr) != 0)
+    {
+        printf("Failed to init mutex attr\n");
+        exit(-1);
+    }
+    if(pthread_mutex_init(&producerMutex, &producerMutexAttr) != 0)
+    {
+        printf("Failed to init mutex\n");
+        exit(-2);
+    }
 
     Array sharedArray;
-    if(array_init(&sharedArray) != 0)
+    if(array_init(&sharedArray))
     {
         printf("Failed to init shared array\n");
-        return -1;
     }
-    else
-        printf("Initialized shared array\n");
 
-    if(semaphore_init(&requesterSemaphore) != 0)
-    {
-        printf("Failed to init requester semaphore\n");
-        return -1;
-    }
-    else
-        printf("Initialized requester semaphore\n");
-    requesterSemaphore.counter = 1;
+    int numConsumers = atoi(argv[1]);
+    int numProducers = atoi(argv[2]);
 
-    if(semaphore_init(&resolverSemaphore) != 0)
-    {
-        printf("Failed to init resolver semaphore\n");
-        return -1;
-    }
-    else
-        printf("Initialized resolver semaphore\n");
-    resolverSemaphore.counter = 1;
+    if (numConsumers > MAX_RESOLVER_THREADS)
+        numConsumers = MAX_RESOLVER_THREADS;
+    if (numProducers > MAX_REQUESTER_THREADS)
+        numProducers = MAX_REQUESTER_THREADS;
 
-    if(numRequesters > 0 && build_requesters(&numRequesters, requesterLog, &sharedArray, &requesterLogFile, &requesterThreads, &requesterArgs, (argc-6), argv + 6, &requesterSemaphore) != 0)
-    {
-        printf("Failed to build requester threads\n");
-        // ToDo, free resources
-        return -1;
-    }
-    else
-        printf("Built requesters\n");
+    int numFiles = argc - 5;
+    if (numFiles > MAX_INPUT_FILES)
+        numFiles = MAX_INPUT_FILES;
 
-    if(numResolvers > 0 && build_resolvers(numResolvers, resolverLog, &sharedArray, &resolverLogFile, &finishedByte, &resolverThreads, &resolverArgs, &resolverSemaphore))
-    {
-        printf("Failed to build resolver threads\n");
-        // ToDo, free resources
-        return -1;
-    }
-    else
-        printf("Built resolvers\n");
+    if (numProducers > numFiles)
+        numProducers = numFiles;
 
-    for (int i = 0; i < numRequesters; i++)
+    //printf("Num producers: %i\nNum files: %i\n", numProducers, numFiles);
+
+    pthread_t consumerThreads[numConsumers];
+    pthread_t producerThreads[numProducers];
+    struct ConsumerArgs consumerArgs[numConsumers];
+    struct ProducerArgs producerArgs[numProducers];
+    for(int i = 0; i < numConsumers; i++)
     {
-        pthread_join(requesterThreads[i], NULL);
+        consumer_args_init(&consumerArgs[i], consumerLog, &consumerMutex, &sharedArray, &finishedByte, &consumerThreads[i]);
     }
-    printf("Finished requesters\n");
+    
+    //printf("Num files: %i\n", numFiles);
+    int numFilesPerThread = numFiles/numProducers;
+    int remainder = numFiles%numProducers;
+    //printf("Num files per thread: %i\nRemainder: %i\n", numFilesPerThread, remainder);
+    //printf("Num files per thread: %i, remainder: %i\n", numFilesPerThread, numFiles%numProducers);
+    argv += 5;
+    for(int i = 0; i < numProducers; i++)
+    {
+        producer_args_init(&producerArgs[i], producerLog, &producerMutex, &sharedArray, argv++, numFilesPerThread, &producerThreads[i]);
+        if(i < remainder)
+        {
+            producerArgs[i].numSourceFiles++;
+            argv++;
+            producerArgs[i].sourceFileNames++;
+        }
+    }
+
+    //printf("Initialized thread args\n");
+
+    for(int i = 0; i < numConsumers; i++)
+    {
+        if(pthread_create(&consumerThreads[i], NULL, consumer_work, (void*) &consumerArgs[i]) != 0)
+        {
+            printf("Failed to start thread: %i\n", i);
+        }
+        //printf("Started consumer thread: %X\n", consumerThreads[i]);
+    }
+    for(int i = 0; i < numProducers; i++)
+    {
+        if(pthread_create(&producerThreads[i], NULL, producer_work, (void*) &producerArgs[i]) != 0)
+        {
+            printf("Failed to start thread: %i\n", i);
+        }
+        //printf("Started producer thread: %X\n", producerThreads[i]);
+    }
+
+    for(int i = 0; i < numProducers; i++)
+    {
+        pthread_join(producerThreads[i], NULL);
+        //printf("Producer %i / %i exited\n", i + 1, numProducers);
+    }
+    //printf("Producers finished\n");
     finishedByte = 1;
-    printf("Set finished byte\n");
 
-    printf("Semaphore value: %i\n", sharedArray.consumeSemaphore.counter);
-    printf("Shared array count: %i\n", sharedArray.count);
-    printf("Finished byte pointer: %p\n", &finishedByte);
+    //printf("Produce count: %i\n", produceCount);
+    //printf("Consume count: %i\n", consumeCount);
 
-    pthread_exit(NULL);
-
-    // Wait for all threads to exit
-    for (int i = 0; i < numResolvers; i++)
+    if(array_count(&sharedArray) == 0)
     {
-        pthread_join(resolverThreads[i], NULL);
+        // Program is finished
+        array_free(&sharedArray);
+
+        //printf("Free-ed array loc A\n");
     }
+    else
+    {
+        // Use the produce semaphore as a way to prevent busy waiting
+        while(sem_wait(&sharedArray.produceSemaphore) == 0)
+        {
+            if(array_count(&sharedArray) == 0)
+            {
+                // Program is finished
+                array_free(&sharedArray);
 
-    printf("Finished program\n");
+                //printf("Free-ed array loc B\n");
+                break;
+            }
+        }
+        for(int i = 0; i < numConsumers; i++)
+        {
+            pthread_join(consumerThreads[i], NULL);
+            //printf("Producer %i / %i exited\n", i + 1, numProducers);
+        }
+    }
+    
+    fclose(producerLog);
+    fclose(consumerLog);
 
-    return 0;
+    gettimeofday(&endTime, NULL);
+
+    printf("./multi-lookup: total time is %1.6f seconds\n", ((endTime.tv_sec - startTime.tv_sec) + 1e-9*(endTime.tv_usec - startTime.tv_usec)));
 }

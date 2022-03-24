@@ -1,40 +1,53 @@
 #ifndef _MULTI_LOOKUP_H_
 #define _MULTI_LOOKUP_H_
 
+// printf, fgets
 #include <stdio.h>
+// strlen
 #include <string.h>
+// 
 #include <stdlib.h>
+// threading funct
 #include <pthread.h>
+// gettimeofday
+#include <time.h>
+#include <sys/time.h>
 
 #include "array.h"
+#include "util.h"
 
-typedef struct RequesterArgs
+// #define NUM_PRODUCERS 16
+// #define NUM_CONSUMERS 16
+
+#define MAX_INPUT_FILES 100
+#define MAX_REQUESTER_THREADS 10
+#define MAX_RESOLVER_THREADS 10
+#define MAX_IP_LENGTH INET6_ADDRSTRLEN
+
+typedef struct ProducerArgs
 {
-    char ** sourceFileNames;
+    FILE * logFile;
+    pthread_mutex_t * fileMutex;
+    Array * sharedArray;
+
+    char** sourceFileNames;
     int numSourceFiles;
-
-    Array * sharedArray;
     
-    FILE * logFile;
-    Semaphore * logFileSemaphore;
-} RequesterArgs;
+    pthread_t * threadID;
+} ProducerArgs;
 
-typedef struct ResolverArgs
+typedef struct ConsumerArgs
 {
     FILE * logFile;
-    Semaphore * logFileSemaphore;
-    
+    pthread_mutex_t * fileMutex;
     Array * sharedArray;
 
-    char * finished;
-} ResolverArgs;
+    char * finishedByte;
 
-char requester_args_init(RequesterArgs* args, int numSourceFiles);
-void requester_args_free(RequesterArgs* args);
-void* requester_run(void* args);
+    pthread_t * threadID;
+} ConsumerArgs;
 
-char resolver_args_init(ResolverArgs* args);
-void resolver_args_free(ResolverArgs* args);
-void* resolver_run(void* args);
+void consumer_args_init(ConsumerArgs * pArgs, FILE * logFile, pthread_mutex_t * fileMutex, Array * sharedArray, char* finishedByte, pthread_t* threadID);
+void producer_args_init(ProducerArgs * pArgs, FILE * logFile, pthread_mutex_t * fileMutex, Array * sharedArray, char** fileNames, int numFiles, pthread_t* threadID);
 
-#endif
+#endif // _MULTI_LOOKUP_H_
